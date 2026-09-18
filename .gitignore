@@ -21,3 +21,6 @@ coverage/
 *.log
 __pycache__/
 *.py[cod]
+
+# Logic test bundle
+.logic-test/*.cjs

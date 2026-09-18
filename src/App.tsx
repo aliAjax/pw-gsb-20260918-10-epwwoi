@@ -1,126 +1,156 @@
+import { useMemo, useState } from "react";
 import "./styles.css";
+import { useWorkbench } from "./useWorkbench";
+import NewBatchForm from "./NewBatchForm";
+import BatchCard from "./BatchCard";
+import OrderView from "./OrderView";
+import { clearStorage } from "./data";
+import { batchCarat } from "./types";
 
-const project = {
-  "sourceNo": 8,
-  "id": "hxyfront-62006",
-  "port": 62006,
-  "title": "珠宝镶嵌宝石分拣",
-  "domain": "珠宝镶嵌",
-  "prompt": "我需要一个面向珠宝镶嵌工作室的宝石分拣前端系统，可以记录宝石编号、种类、形状、克拉重量、尺寸、净度、颜色、切工、镶嵌位置和分拣状态。页面需要有分拣批次、尺寸筛选、镶嵌位置示意图、缺陷备注和按订单查看的宝石清单。",
-  "palette": [
-    "#be123c",
-    "#0f766e",
-    "#a855f7"
-  ],
-  "metrics": [
-    "分拣批次",
-    "待镶嵌",
-    "缺陷备注",
-    "总克拉"
-  ],
-  "filters": [
-    "圆形",
-    "椭圆",
-    "梨形",
-    "祖母绿切"
-  ],
-  "fields": [
-    "宝石编号",
-    "种类",
-    "形状",
-    "克拉重量",
-    "尺寸",
-    "镶嵌位置"
-  ],
-  "records": [
-    [
-      "ST-2048",
-      "蓝宝石",
-      "椭圆6x4mm",
-      "主石位"
-    ],
-    [
-      "ST-2061",
-      "钻石",
-      "圆形0.08ct",
-      "围石A组"
-    ],
-    [
-      "ST-2099",
-      "祖母绿",
-      "内含物明显",
-      "需客户确认"
-    ]
-  ]
-};
+type StatusFilter = "all" | "editing" | "submitted";
 
 function App() {
+  const wb = useWorkbench();
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [keyword, setKeyword] = useState("");
+
+  const visibleBatches = useMemo(() => {
+    return wb.state.batches.filter((b) => {
+      if (statusFilter !== "all" && b.status !== statusFilter) return false;
+      if (keyword.trim()) {
+        const kw = keyword.trim().toLowerCase();
+        const hit =
+          b.id.toLowerCase().includes(kw) ||
+          b.label.toLowerCase().includes(kw) ||
+          b.orderNo.toLowerCase().includes(kw) ||
+          b.roster.some(
+            (id) =>
+              id.toLowerCase().includes(kw) ||
+              wb.gemMap.get(id)?.species.toLowerCase().includes(kw)
+          );
+        if (!hit) return false;
+      }
+      return true;
+    });
+  }, [wb.state.batches, wb.gemMap, statusFilter, keyword]);
+
+  const metrics = useMemo(() => {
+    const editing = wb.state.batches.filter((b) => b.status === "editing").length;
+    const submitted = wb.state.batches.filter(
+      (b) => b.status === "submitted"
+    ).length;
+    const lockedCarat = wb.state.batches
+      .filter((b) => b.status === "submitted")
+      .reduce((s, b) => s + batchCarat(wb.state.gems, b), 0);
+    return {
+      batches: wb.state.batches.length,
+      editing,
+      submitted,
+      lockedCarat: lockedCarat.toFixed(2),
+    };
+  }, [wb.state.batches, wb.state.gems]);
+
+  const resetAll = () => {
+    if (window.confirm("清空全部批次并恢复示例宝石数据？此操作不可撤销。")) {
+      clearStorage();
+      window.location.reload();
+    }
+  };
+
   return (
     <main className="app">
       <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
+        <p>hxyfront-62006 · 珠宝镶嵌工作室 · Port 62006</p>
+        <h1>宝石分拣工作台</h1>
+        <span>
+          分批工作流：建批时先按尺寸筛选 → 逐颗归入主石 / 围石 / 配石 / 退回待定 →
+          提交校验（主石位限 1、围石位限 8，未定去向或超容整批拒绝并标出冲突）→
+          提交即锁定，可撤回，原去向与每次调整记录均保留；数据本地持久化，刷新页面可继续。
+        </span>
       </section>
 
       <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[86, 14, 7, 32][index] ?? 12}</strong>
-          </article>
-        ))}
+        <article>
+          <small>分拣批次</small>
+          <strong>{metrics.batches}</strong>
+        </article>
+        <article>
+          <small>分拣中</small>
+          <strong>{metrics.editing}</strong>
+        </article>
+        <article>
+          <small>已锁定</small>
+          <strong>{metrics.submitted}</strong>
+        </article>
+        <article>
+          <small>锁定总克拉</small>
+          <strong>{metrics.lockedCarat}</strong>
+        </article>
       </section>
 
-      <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}筛选</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
+      <NewBatchForm wb={wb} onCreated={() => setStatusFilter("all")} />
 
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存草稿</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
-      </section>
-
-      <section className="panel">
+      <section className="panel batch-list-panel">
         <div className="heading">
           <div>
-            <p>历史记录</p>
-            <h2>近期工作台</h2>
+            <p>第二步 · 逐颗归位并提交</p>
+            <h2>分拣批次</h2>
           </div>
-          <button>导出摘要</button>
+          <div className="list-controls">
+            <input
+              className="search"
+              placeholder="搜批次号 / 订单 / 宝石编号 / 种类"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+            />
+            <div className="chips">
+              {(
+                [
+                  ["all", `全部 ${wb.state.batches.length}`],
+                  [
+                    "editing",
+                    `分拣中 ${metrics.editing}`,
+                  ],
+                  [
+                    "submitted",
+                    `已锁定 ${metrics.submitted}`,
+                  ],
+                ] as [StatusFilter, string][]
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  className={statusFilter === key ? "chip-on" : ""}
+                  onClick={() => setStatusFilter(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button onClick={resetAll}>重置示例数据</button>
+          </div>
         </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
+
+        {wb.state.batches.length === 0 && (
+          <p className="empty-hint">
+            还没有批次。在上方设置尺寸区间并「按筛选结果建批」开始分拣。
+          </p>
+        )}
+        {wb.state.batches.length > 0 && visibleBatches.length === 0 && (
+          <p className="empty-hint">没有符合筛选条件的批次。</p>
+        )}
+
+        <div className="batch-list">
+          {visibleBatches.map((batch) => (
+            <BatchCard key={batch.id} batch={batch} wb={wb} />
           ))}
         </div>
       </section>
+
+      <OrderView wb={wb} />
+
+      <footer className="foot">
+        数据保存在本浏览器 localStorage（gem-sorting-workbench:v1），仅用于演示，刷新与重开页面后可继续分拣。
+      </footer>
     </main>
   );
 }
